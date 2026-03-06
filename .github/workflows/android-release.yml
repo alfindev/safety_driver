@@ -66,18 +66,22 @@ jobs:
         env:
           NODE_ENV: production
 
-      # Langkah tambahan untuk debug jika folder tidak ditemukan
-      - name: List Files for Debugging
+      # ── LANGKAH KUNCI: MENCARI APK SECARA OTOMATIS ──
+      - name: Locate and Collect APK
         run: |
-          echo "Checking build outputs..."
-          ls -R nativephp/android/app/build/outputs/apk/ || echo "Folder not found"
+          mkdir -p final-build-output
+          echo "Searching for APK files..."
+          # Mencari semua file .apk yang bukan debug, lalu copy ke folder final-build-output
+          find . -name "*.apk" -type f -not -path "*/debug/*" -exec cp {} ./final-build-output/ \;
+          echo "Contents of final-build-output:"
+          ls ./final-build-output/
 
       - name: Sign APK Release
         uses: r0adkll/sign-android-release@v1
         id: sign_app
         with:
-          # Target folder release di dalam subfolder nativephp
-          releaseDirectory: nativephp/android/app/build/outputs/apk/release
+          # Sekarang kita arahkan ke folder buatan kita sendiri yang pasti ada isinya
+          releaseDirectory: final-build-output
           signingKeyBase64: ${{ secrets.SIGNING_KEY }}
           alias: ${{ secrets.ALIAS }}
           keyStorePassword: ${{ secrets.KEYSTORE_PASSWORD }}
