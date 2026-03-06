@@ -70,7 +70,7 @@ jobs:
 
       # ── 11. Build APK
       - name: Build Android APK
-        run: php artisan native:build android --no-interaction
+        run: php artisan native:build --no-interaction
 
       # ── 12. Upload APK sebagai artifact (bisa didownload)
       - name: Upload APK
