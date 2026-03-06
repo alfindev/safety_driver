@@ -50,6 +50,8 @@ jobs:
         run: |
           php artisan native:install --no-interaction --force
           rm -rf nativephp/ios
+          # Create dummy iOS command to prevent artisan failure
+          mkdir -p vendor/nativephp/mobile/src/Commands
           cat <<EOF > vendor/nativephp/mobile/src/Commands/BuildIosAppCommand.php
           <?php
           namespace Native\Mobile\Commands;
@@ -61,47 +63,58 @@ jobs:
           }
           EOF
 
-      # ── 4. OPERASI BEDAH TOTAL (GRADLE & MANIFEST) ──
-      - name: Patch Broken Template & Manifest
+      # ── 4. IKON & NAMA APLIKASI ──
+      - name: Setup Branding (Icon & Name)
         run: |
-          # 1. Patch Gradle
+          # 1. Update Ikon (Pastikan file ini ada di repo kamu)
+          SOURCE_ICON="public/icon.png"
+          TARGET_DIR="nativephp/android/app/src/main/res/mipmap-xxxhdpi"
+          if [ -f "$SOURCE_ICON" ]; then
+            mkdir -p "$TARGET_DIR"
+            cp "$SOURCE_ICON" "$TARGET_DIR/ic_launcher.png"
+            cp "$SOURCE_ICON" "$TARGET_DIR/ic_launcher_round.png"
+            echo "Icon updated."
+          fi
+
+          # 2. Update Nama Aplikasi di strings.xml
+          STRINGS_FILE="nativephp/android/app/src/main/res/values/strings.xml"
+          if [ -f "$STRINGS_FILE" ]; then
+            # Mengganti nama aplikasi yang muncul di HP
+            sed -i 's/REPLACE_APP_NAME/Safety Driver/g' "$STRINGS_FILE"
+          fi
+
+      # ── 5. OPERASI BEDAH FINAL (FORCE PATCH) ──
+      - name: Force Patch Placeholder
+        run: |
+          # Patch semua file di folder android secara massal untuk REPLACE_APP_ID
+          find nativephp/android -type f -exec sed -i 's/REPLACE_APP_ID/com.runner.bloomriverbold/g' {} +
+          
+          # Patch spesifik untuk Gradle
           GRADLE_FILE="nativephp/android/app/build.gradle.kts"
           if [ -f "$GRADLE_FILE" ]; then
             sed -i 's/REPLACEMECODE/1/g' "$GRADLE_FILE"
             sed -i 's/REPLACE_MINIFY_ENABLED/false/g' "$GRADLE_FILE"
             sed -i 's/REPLACE_SHRINK_RESOURCES/false/g' "$GRADLE_FILE"
             sed -i 's/REPLACE_DEBUG_SYMBOLS/none/g' "$GRADLE_FILE"
-            # Tambahan: Patch App ID di Gradle juga jika ada
-            sed -i 's/REPLACE_APP_ID/com.runner.bloomriverbold/g' "$GRADLE_FILE"
           fi
+          
+          echo "Patching completed."
 
-          # 2. Patch AndroidManifest.xml (Penyebab error terakhir)
-          MANIFEST_FILE="nativephp/android/app/src/main/AndroidManifest.xml"
-          if [ -f "$MANIFEST_FILE" ]; then
-            echo "Patching Manifest: $MANIFEST_FILE"
-            sed -i 's/REPLACE_APP_ID/com.runner.bloomriverbold/g' "$MANIFEST_FILE"
-            # Verifikasi
-            grep "package=" "$MANIFEST_FILE"
-          else
-            echo "Manifest not found at $MANIFEST_FILE, searching..."
-            find nativephp/android -name "AndroidManifest.xml" -exec sed -i 's/REPLACE_APP_ID/com.runner.bloomriverbold/g' {} +
-          fi
-
-      # ── 5. MANUAL GRADLE BUILD ──
+      # ── 6. MANUAL GRADLE BUILD ──
       - name: Build with Gradle Manual
         run: |
           cd nativephp/android
           chmod +x gradlew
           ./gradlew assembleRelease --stacktrace
 
-      # ── 6. MENGUMPULKAN HASIL ──
+      # ── 7. MENGUMPULKAN HASIL ──
       - name: Collect APK
         run: |
           mkdir -p final-build-output
           find nativephp/android/app/build/outputs/apk/release -name "*.apk" -exec cp {} ./final-build-output/ \;
           ls ./final-build-output/
 
-      # ── 7. SIGNING ──
+      # ── 8. SIGNING ──
       - name: Sign APK Release
         uses: r0adkll/sign-android-release@v1
         id: sign_app
