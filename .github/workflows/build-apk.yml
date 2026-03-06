@@ -1,91 +1,27 @@
-name: Build APK Android
+- name: Generate Keystore & Sign APK
+  run: |
+    # Generate keystore langsung di CI (tidak perlu lokal)
+    keytool -genkeypair -v \
+      -keystore release.jks \
+      -alias safety-driver \
+      -keyalg RSA \
+      -keysize 2048 \
+      -validity 10000 \
+      -storepass password123 \
+      -keypass password123 \
+      -dname "CN=Safety Driver, OU=IT, O=Perusahaan, L=Jakarta, S=DKI, C=ID"
 
-on:
-  push:
-    branches: [main]
-  workflow_dispatch:
+    mkdir -p signed-output
+    RAW_APK=$(find nativephp/android/app/build/outputs/apk/release -name "*.apk" | head -n 1)
 
-jobs:
-  build:
-    runs-on: ubuntu-latest
+    curl -L -o uber-apk-signer.jar https://github.com/patrickfav/uber-apk-signer/releases/download/v1.3.0/uber-apk-signer-1.3.0.jar
 
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+    java -jar uber-apk-signer.jar \
+      --apks "$RAW_APK" \
+      --ks release.jks \
+      --ksAlias safety-driver \
+      --ksPass password123 \
+      --ksKeyPass password123 \
+      --out signed-output
 
-      - name: Setup PHP
-        uses: shivammathur/setup-php@v2
-        with:
-          php-version: "8.3"
-          extensions: mbstring, xml, sqlite3, gd, zip, curl, bcmath
-          coverage: none
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-          cache: "npm"
-
-      - name: Setup Java
-        uses: actions/setup-java@v4
-        with:
-          distribution: "temurin"
-          java-version: "17"
-
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install System Tools
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y zip unzip libnss3-dev
-
-      - name: Install Composer dependencies
-        run: composer install --no-dev --optimize-autoloader --no-interaction
-
-      - name: Setup environment
-        run: |
-          cp .env.example .env
-          php artisan key:generate --force
-          echo "DB_CONNECTION=sqlite" >> .env
-          echo "NATIVEPHP_APP_ID=com.runner.bloomriverbold" >> .env
-
-      - name: Build frontend assets
-        run: |
-          npm ci
-          npm run build
-
-      # ── 10. Bypass iOS (Mocking isi file agar tidak error ZIP) ──
-      - name: Bypass iOS Build Logic
-        run: |
-          php artisan native:install --no-interaction --force
-          rm -rf nativephp/ios
-          # Kita timpa isi BuildIosAppCommand agar fungsinya kosong (return true)
-          # Ini mencegah error ZIP tapi tetap menjaga struktur class agar autoloading tidak pecah
-          cat <<EOF > vendor/nativephp/mobile/src/Commands/BuildIosAppCommand.php
-          <?php
-          namespace Native\Mobile\Commands;
-          use Illuminate\Console\Command;
-          class BuildIosAppCommand extends Command {
-              protected \$signature = 'native:build-ios';
-              public function handle() { return 0; }
-              public function bundleLaravelApp() { return true; }
-          }
-          EOF
-
-      - name: Build Android APK
-        run: php artisan native:build --no-interaction -vvv
-        env:
-          NODE_ENV: production
-
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: safety-driver-apk
-          path: |
-            dist/android/*.apk
-            storage/nativephp/builds/android/*.apk
-            android/app/build/outputs/apk/**/*.apk
-            nativephp/android/app/build/outputs/apk/**/*.apk
-            **/*.apk
-          if-no-files-found: warn
+    find signed-output -name "*-signed.apk" -exec mv {} signed-output/Safety-Driver-Final.apk \;
