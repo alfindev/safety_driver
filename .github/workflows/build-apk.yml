@@ -10,11 +10,9 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # ── 1. Checkout kode dari repository
       - name: Checkout
         uses: actions/checkout@v4
 
-      # ── 2. Setup PHP environment
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
@@ -22,35 +20,29 @@ jobs:
           extensions: mbstring, xml, sqlite3, gd, zip, curl, bcmath
           coverage: none
 
-      # ── 3. Setup Node.js untuk build assets (Vite/Mix)
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "20"
           cache: "npm"
 
-      # ── 4. Setup Java (Wajib untuk proses Gradle/Android)
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: "temurin"
           java-version: "17"
 
-      # ── 5. Setup Android SDK
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      # ── 6. Install Tools sistem untuk kompresi file
       - name: Install System Tools
         run: |
           sudo apt-get update
           sudo apt-get install -y zip unzip libnss3-dev
 
-      # ── 7. Install dependensi Laravel (Composer)
       - name: Install Composer dependencies
         run: composer install --no-dev --optimize-autoloader --no-interaction
 
-      # ── 8. Konfigurasi Environment (.env)
       - name: Setup environment
         run: |
           cp .env.example .env
@@ -58,26 +50,25 @@ jobs:
           echo "DB_CONNECTION=sqlite" >> .env
           echo "NATIVEPHP_APP_ID=com.runner.bloomriverbold" >> .env
 
-      # ── 9. Build Frontend Assets
       - name: Build frontend assets
         run: |
           npm ci
           npm run build
 
-      # ── 10. Install NativePHP & Hapus folder iOS
-      # Langkah 'rm -rf' krusial agar GitHub Actions tidak mencoba memproses target iOS di Linux
-      - name: Prepare NativePHP Mobile
+      # ── 10. Trik bypass iOS ──
+      - name: Fix NativePHP Command Conflict
         run: |
           php artisan native:install --no-interaction --force
+          # Hapus project ios
           rm -rf nativephp/ios
+          # Hapus secara paksa file Command iOS di vendor agar tidak dipanggil oleh native:build
+          find vendor/nativephp/mobile/src/Commands -name "BuildIosAppCommand.php" -delete
 
-      # ── 11. Jalankan Build APK
       - name: Build Android APK
         run: php artisan native:build --no-interaction -vvv
         env:
           NODE_ENV: production
 
-      # ── 12. Upload hasil build (Artifact)
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
@@ -89,4 +80,3 @@ jobs:
             nativephp/android/app/build/outputs/apk/**/*.apk
             **/*.apk
           if-no-files-found: warn
-          retention-days: 30
