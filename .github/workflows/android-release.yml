@@ -13,11 +13,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup PHP
+      - name: Setup PHP & Java
         uses: shivammathur/setup-php@v2
         with:
           php-version: "8.3"
           extensions: mbstring, xml, sqlite3, gd, zip, curl, bcmath
+
+      - name: Setup Java (For Signing)
+        uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "17"
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -25,70 +31,36 @@ jobs:
           node-version: "20"
           cache: "npm"
 
-      - name: Setup Java
-        uses: actions/setup-java@v4
-        with:
-          distribution: "temurin"
-          java-version: "17"
-
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
       - name: Install Dependencies
         run: |
           composer install --no-dev --optimize-autoloader --no-interaction
           npm ci
           npm run build
 
-      - name: Setup .env
-        run: |
-          cp .env.example .env
-          php artisan key:generate --force
-          echo "NATIVEPHP_APP_ID=com.runner.bloomriverbold" >> .env
-
-      - name: Prepare NativePHP & Bypass iOS
+      - name: Prepare NativePHP
         run: |
           php artisan native:install --no-interaction --force
           rm -rf nativephp/ios
-          # Membuat dummy command agar artisan tidak error saat mencari class iOS
           mkdir -p vendor/nativephp/mobile/src/Commands
           cat <<EOF > vendor/nativephp/mobile/src/Commands/BuildIosAppCommand.php
           <?php
           namespace Native\Mobile\Commands;
           use Illuminate\Console\Command;
-          class BuildIosAppCommand extends Command {
+          class BuildIosAppCommand {
               protected \$signature = 'native:build-ios';
               public function handle() { return 0; }
               public function bundleLaravelApp() { return true; }
           }
           EOF
 
-      # ── 4. BRANDING: IKON & NAMA APLIKASI ──
-      - name: Setup Branding (Icon & Name)
+      - name: Patch & Branding
         run: |
-          # 1. Update Ikon (Pastikan ada file di public/icon.png)
-          SOURCE_ICON="public/icon.png"
-          TARGET_DIR="nativephp/android/app/src/main/res/mipmap-xxxhdpi"
-          if [ -f "$SOURCE_ICON" ]; then
-            mkdir -p "$TARGET_DIR"
-            cp "$SOURCE_ICON" "$TARGET_DIR/ic_launcher.png"
-            cp "$SOURCE_ICON" "$TARGET_DIR/ic_launcher_round.png"
-            echo "Icon updated."
-          fi
-
-          # 2. Update Nama Aplikasi di strings.xml
-          STRINGS_FILE="nativephp/android/app/src/main/res/values/strings.xml"
-          if [ -f "$STRINGS_FILE" ]; then
-            sed -i 's/REPLACE_APP_NAME/Safety Driver/g' "$STRINGS_FILE"
-          fi
-
-      # ── 5. OPERASI BEDAH PLACEHOLDER (GANTI SEMUA VARIABLE RUSAK) ──
-      - name: Force Patch Placeholder
-        run: |
-          # Ganti REPLACE_APP_ID di semua file dalam folder android
+          # Patch App ID & Name
           find nativephp/android -type f -exec sed -i 's/REPLACE_APP_ID/com.runner.bloomriverbold/g' {} +
+          STRINGS_FILE="nativephp/android/app/src/main/res/values/strings.xml"
+          [ -f "$STRINGS_FILE" ] && sed -i 's/REPLACE_APP_NAME/Safety Driver/g' "$STRINGS_FILE"
 
-          # Patch spesifik untuk file Gradle (Placeholder NativePHP)
+          # Patch Gradle placeholders
           GRADLE_FILE="nativephp/android/app/build.gradle.kts"
           if [ -f "$GRADLE_FILE" ]; then
             sed -i 's/REPLACEMECODE/1/g' "$GRADLE_FILE"
@@ -96,48 +68,44 @@ jobs:
             sed -i 's/REPLACE_SHRINK_RESOURCES/false/g' "$GRADLE_FILE"
             sed -i 's/REPLACE_DEBUG_SYMBOLS/none/g' "$GRADLE_FILE"
           fi
-          echo "Patching completed."
 
-      # ── 6. MANUAL GRADLE BUILD (MENGHASILKAN APK) ──
-      - name: Build with Gradle Manual
+      - name: Build Unsigned APK
         run: |
           cd nativephp/android
           chmod +x gradlew
-          ./gradlew assembleRelease --stacktrace
+          ./gradlew assembleRelease
 
-      # ── 7. MENGUMPULKAN HASIL APK ──
-      - name: Collect APK
-        run: |
-          mkdir -p final-build-output
-          find nativephp/android/app/build/outputs/apk/release -name "*.apk" -exec cp {} ./final-build-output/ \;
-          echo "Isi folder output:"
-          ls ./final-build-output/
-
-      # ── 8. SIGNING (PEMBERIAN TANDA TANGAN DIGITAL) ──
-      - name: Sign APK Release
-        uses: r0adkll/sign-android-release@v1
-        id: sign_app
-        with:
-          releaseDirectory: final-build-output
-          signingKeyBase64: ${{ secrets.SIGNING_KEY }}
-          alias: ${{ secrets.ALIAS }}
-          keyStorePassword: ${{ secrets.KEYSTORE_PASSWORD }}
-          keyPassword: ${{ secrets.KEY_PASSWORD }}
+      # ── LANGKAH SIGNING ALTERNATIF (TANPA TOOL BAWAAN) ──
+      - name: Sign APK with Uber-APK-Signer
         env:
-          BUILD_TOOLS_VERSION: "34.0.0"
+          SIGNING_KEY_BASE64: ${{ secrets.SIGNING_KEY }}
+        run: |
+          # 1. Buat folder output
+          mkdir -p signed-output
 
-      # Backup: Jika signing gagal, kita tetap bisa ambil APK mentah untuk dicek
-      - name: Upload Unsigned APK (Backup)
-        if: failure()
+          # 2. Cari file APK hasil build
+          RAW_APK=$(find nativephp/android/app/build/outputs/apk/release -name "*.apk" | head -n 1)
+
+          # 3. Download signer otomatis
+          curl -L -o uber-apk-signer.jar https://github.com/patrickfav/uber-apk-signer/releases/download/v1.3.0/uber-apk-signer-1.3.0.jar
+
+          # 4. Decode Keystore dari Secret
+          echo "$SIGNING_KEY_BASE64" | base64 -d > release.jks
+
+          # 5. Eksekusi Signing
+          java -jar uber-apk-signer.jar \
+            --apks "$RAW_APK" \
+            --ks release.jks \
+            --ksAlias "${{ secrets.ALIAS }}" \
+            --ksPass "${{ secrets.KEYSTORE_PASSWORD }}" \
+            --ksKeyPass "${{ secrets.KEY_PASSWORD }}" \
+            --out signed-output
+
+          # Ubah nama file agar mudah dikenali
+          mv signed-output/*-aligned-signed.apk signed-output/Safety-Driver-Final.apk
+
+      - name: Upload Final APK
         uses: actions/upload-artifact@v4
         with:
-          name: Safety-Driver-Unsigned-Build
-          path: final-build-output/*.apk
-
-      # Success: Upload APK yang sudah ditandatangani dan siap install
-      - name: Upload Official Signed APK
-        if: success()
-        uses: actions/upload-artifact@v4
-        with:
-          name: Safety-Driver-Final-Signed
-          path: ${{ steps.sign_app.outputs.signedReleaseFile }}
+          name: Safety-Driver-App
+          path: signed-output/Safety-Driver-Final.apk
