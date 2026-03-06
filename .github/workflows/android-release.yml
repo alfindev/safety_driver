@@ -87,7 +87,7 @@ jobs:
         run: |
           # Ganti REPLACE_APP_ID di semua file dalam folder android
           find nativephp/android -type f -exec sed -i 's/REPLACE_APP_ID/com.runner.bloomriverbold/g' {} +
-          
+
           # Patch spesifik untuk file Gradle (Placeholder NativePHP)
           GRADLE_FILE="nativephp/android/app/build.gradle.kts"
           if [ -f "$GRADLE_FILE" ]; then
