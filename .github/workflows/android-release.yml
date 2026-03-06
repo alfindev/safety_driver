@@ -61,26 +61,29 @@ jobs:
           }
           EOF
 
-      # ── 4. PERBAIKAN FILE GRADLE (THE SURGERY) ──
+      # ── 4. PERBAIKAN FILE GRADLE (V2) ──
       - name: Patch Broken Gradle Template
         run: |
-          # Cari lokasi file build.gradle.kts
-          TARGET_FILE=$(find . -name "build.gradle.kts" | grep "app/build.gradle.kts")
-          echo "Patching file: $TARGET_FILE"
-          
-          # Kita ganti placeholder yang error dengan nilai default
-          sed -i 's/REPLACEMECODE/1/g' "$TARGET_FILE"
-          sed -i 's/REPLACE_MINIFY_ENABLED/false/g' "$TARGET_FILE"
-          sed -i 's/REPLACE_SHRINK_RESOURCES/false/g' "$TARGET_FILE"
-          
-          # Verifikasi hasil patch
-          grep -E "versionCode|isMinifyEnabled|isShrinkResources" "$TARGET_FILE"
+          # Fokus hanya pada file di folder nativephp/android
+          TARGET_FILE="nativephp/android/app/build.gradle.kts"
+
+          if [ -f "$TARGET_FILE" ]; then
+            echo "Patching file: $TARGET_FILE"
+            sed -i 's/REPLACEMECODE/1/g' "$TARGET_FILE"
+            sed -i 's/REPLACE_MINIFY_ENABLED/false/g' "$TARGET_FILE"
+            sed -i 's/REPLACE_SHRINK_RESOURCES/false/g' "$TARGET_FILE"
+            
+            echo "Verifying patch..."
+            grep -E "versionCode|isMinifyEnabled|isShrinkResources" "$TARGET_FILE"
+          else
+            echo "Error: $TARGET_FILE not found!"
+            exit 1
+          fi
 
       # ── 5. MANUAL GRADLE BUILD ──
       - name: Build with Gradle Manual
         run: |
-          DIR=$(find . -name "gradlew" -exec dirname {} \; | head -n 1)
-          cd "$DIR"
+          cd nativephp/android
           chmod +x gradlew
           ./gradlew assembleRelease --stacktrace
 
@@ -88,7 +91,7 @@ jobs:
       - name: Collect APK
         run: |
           mkdir -p final-build-output
-          find . -name "*.apk" -exec cp {} ./final-build-output/ \;
+          find nativephp/android/app/build/outputs/apk/release -name "*.apk" -exec cp {} ./final-build-output/ \;
           ls ./final-build-output/
 
       # ── 7. SIGNING ──
