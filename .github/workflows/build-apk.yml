@@ -55,14 +55,23 @@ jobs:
           npm ci
           npm run build
 
-      # ── 10. Trik bypass iOS ──
-      - name: Fix NativePHP Command Conflict
+      # ── 10. Bypass iOS (Mocking isi file agar tidak error ZIP) ──
+      - name: Bypass iOS Build Logic
         run: |
           php artisan native:install --no-interaction --force
-          # Hapus project ios
           rm -rf nativephp/ios
-          # Hapus secara paksa file Command iOS di vendor agar tidak dipanggil oleh native:build
-          find vendor/nativephp/mobile/src/Commands -name "BuildIosAppCommand.php" -delete
+          # Kita timpa isi BuildIosAppCommand agar fungsinya kosong (return true)
+          # Ini mencegah error ZIP tapi tetap menjaga struktur class agar autoloading tidak pecah
+          cat <<EOF > vendor/nativephp/mobile/src/Commands/BuildIosAppCommand.php
+          <?php
+          namespace Native\Mobile\Commands;
+          use Illuminate\Console\Command;
+          class BuildIosAppCommand extends Command {
+              protected \$signature = 'native:build-ios';
+              public function handle() { return 0; }
+              public function bundleLaravelApp() { return true; }
+          }
+          EOF
 
       - name: Build Android APK
         run: php artisan native:build --no-interaction -vvv
