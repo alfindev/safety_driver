@@ -46,46 +46,38 @@ jobs:
           php artisan key:generate --force
           echo "NATIVEPHP_APP_ID=com.runner.bloomriverbold" >> .env
 
-      - name: Prepare NativePHP & Bypass iOS
+      # ── 3. Persiapan NativePHP & Generate Folder Android ──
+      - name: Prepare NativePHP Project
         run: |
           php artisan native:install --no-interaction --force
+          # Pastikan folder android digenerate
+          php artisan native:build --no-interaction || echo "Native build command stopped, continuing manual..."
           rm -rf nativephp/ios
-          cat <<EOF > vendor/nativephp/mobile/src/Commands/BuildIosAppCommand.php
-          <?php
-          namespace Native\Mobile\Commands;
-          use Illuminate\Console\Command;
-          class BuildIosAppCommand extends Command {
-              protected \$signature = 'native:build-ios';
-              public function handle() { return 0; }
-              public function bundleLaravelApp() { return true; }
-          }
-          EOF
 
-      - name: Build Android APK
-        run: php artisan native:build --no-interaction -vvv
-        env:
-          NODE_ENV: production
+      # ── 4. MANUAL GRADLE BUILD (Langkah Pasti) ──
+      - name: Build with Gradle Manual
+        run: |
+          # Cari di mana folder android berada, lalu masuk dan build
+          if [ -d "nativephp/android" ]; then
+            cd nativephp/android
+          elif [ -d "android" ]; then
+            cd android
+          fi
+          chmod +x gradlew
+          ./gradlew assembleRelease --stacktrace
 
-      # ── DEBUGGING TOTAL ──
-      - name: Deep Search for APKs
+      # ── 5. MENGUMPULKAN HASIL ──
+      - name: Collect APK
         run: |
           mkdir -p final-build-output
-          echo "--- SELURUH FILE APK YANG ADA ---"
-          find . -name "*.apk"
-          echo "--- SELURUH FILE AAB YANG ADA ---"
-          find . -name "*.aab"
-
-          echo "--- MEMINDAHKAN SEMUA APK YANG KETEMU ---"
-          # Kita ambil semua APK yang ketemu, mau debug atau release kita sikat dulu biar tidak error
-          find . -name "*.apk" -exec cp {} ./final-build-output/ \;
-
-          echo "--- ISI FOLDER OUTPUT ---"
+          find . -name "*release*.apk" -exec cp {} ./final-build-output/ \;
+          echo "Isi folder output:"
           ls ./final-build-output/
 
+      # ── 6. SIGNING ──
       - name: Sign APK Release
         uses: r0adkll/sign-android-release@v1
         id: sign_app
-        if: success()
         with:
           releaseDirectory: final-build-output
           signingKeyBase64: ${{ secrets.SIGNING_KEY }}
@@ -98,8 +90,5 @@ jobs:
       - name: Upload Official APK
         uses: actions/upload-artifact@v4
         with:
-          name: Safety-Driver-Final-Package
-          path: |
-            ${{ steps.sign_app.outputs.signedReleaseFile }}
-            final-build-output/*.apk
-          if-no-files-found: warn
+          name: Safety-Driver-Signed-Official
+          path: ${{ steps.sign_app.outputs.signedReleaseFile }}
