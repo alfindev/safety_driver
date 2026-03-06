@@ -66,21 +66,27 @@ jobs:
         env:
           NODE_ENV: production
 
-      # ── LANGKAH KUNCI: MENCARI APK SECARA OTOMATIS ──
-      - name: Locate and Collect APK
+      # ── DEBUGGING TOTAL ──
+      - name: Deep Search for APKs
         run: |
           mkdir -p final-build-output
-          echo "Searching for APK files..."
-          # Mencari semua file .apk yang bukan debug, lalu copy ke folder final-build-output
-          find . -name "*.apk" -type f -not -path "*/debug/*" -exec cp {} ./final-build-output/ \;
-          echo "Contents of final-build-output:"
+          echo "--- SELURUH FILE APK YANG ADA ---"
+          find . -name "*.apk"
+          echo "--- SELURUH FILE AAB YANG ADA ---"
+          find . -name "*.aab"
+
+          echo "--- MEMINDAHKAN SEMUA APK YANG KETEMU ---"
+          # Kita ambil semua APK yang ketemu, mau debug atau release kita sikat dulu biar tidak error
+          find . -name "*.apk" -exec cp {} ./final-build-output/ \;
+
+          echo "--- ISI FOLDER OUTPUT ---"
           ls ./final-build-output/
 
       - name: Sign APK Release
         uses: r0adkll/sign-android-release@v1
         id: sign_app
+        if: success()
         with:
-          # Sekarang kita arahkan ke folder buatan kita sendiri yang pasti ada isinya
           releaseDirectory: final-build-output
           signingKeyBase64: ${{ secrets.SIGNING_KEY }}
           alias: ${{ secrets.ALIAS }}
@@ -92,6 +98,8 @@ jobs:
       - name: Upload Official APK
         uses: actions/upload-artifact@v4
         with:
-          name: Safety-Driver-Release-Signed
-          path: ${{ steps.sign_app.outputs.signedReleaseFile }}
-          retention-days: 30
+          name: Safety-Driver-Final-Package
+          path: |
+            ${{ steps.sign_app.outputs.signedReleaseFile }}
+            final-build-output/*.apk
+          if-no-files-found: warn
