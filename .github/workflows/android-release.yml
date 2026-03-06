@@ -55,12 +55,10 @@ jobs:
 
       - name: Patch & Branding
         run: |
-          # Patch App ID & Name
           find nativephp/android -type f -exec sed -i 's/REPLACE_APP_ID/com.runner.bloomriverbold/g' {} +
           STRINGS_FILE="nativephp/android/app/src/main/res/values/strings.xml"
           [ -f "$STRINGS_FILE" ] && sed -i 's/REPLACE_APP_NAME/Safety Driver/g' "$STRINGS_FILE"
 
-          # Patch Gradle placeholders
           GRADLE_FILE="nativephp/android/app/build.gradle.kts"
           if [ -f "$GRADLE_FILE" ]; then
             sed -i 's/REPLACEMECODE/1/g' "$GRADLE_FILE"
@@ -75,33 +73,33 @@ jobs:
           chmod +x gradlew
           ./gradlew assembleRelease
 
-      # ── LANGKAH SIGNING ALTERNATIF (TANPA TOOL BAWAAN) ──
+      # ── SIGNING DENGAN SECRET KEYSTORE ──
       - name: Sign APK with Uber-APK-Signer
         env:
-          SIGNING_KEY_BASE64: ${{ secrets.SIGNING_KEY }}
+          # Menggunakan nama secret 'KEYSTORE' sesuai permintaanmu
+          ENCODED_KEYSTORE: ${{ secrets.KEYSTORE }}
+          APP_ALIAS: ${{ secrets.ALIAS }}
+          STORE_PASS: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_PASS: ${{ secrets.KEY_PASSWORD }}
         run: |
-          # 1. Buat folder output
           mkdir -p signed-output
-
-          # 2. Cari file APK hasil build
           RAW_APK=$(find nativephp/android/app/build/outputs/apk/release -name "*.apk" | head -n 1)
 
-          # 3. Download signer otomatis
+          # Download tool signer
           curl -L -o uber-apk-signer.jar https://github.com/patrickfav/uber-apk-signer/releases/download/v1.3.0/uber-apk-signer-1.3.0.jar
 
-          # 4. Decode Keystore dari Secret
-          echo "$SIGNING_KEY_BASE64" | base64 -d > release.jks
+          # Decode file keystore dari secret KEYSTORE
+          echo "$ENCODED_KEYSTORE" | base64 -d > release.jks
 
-          # 5. Eksekusi Signing
+          # Jalankan signing
           java -jar uber-apk-signer.jar \
             --apks "$RAW_APK" \
             --ks release.jks \
-            --ksAlias "${{ secrets.ALIAS }}" \
-            --ksPass "${{ secrets.KEYSTORE_PASSWORD }}" \
-            --ksKeyPass "${{ secrets.KEY_PASSWORD }}" \
+            --ksAlias "$APP_ALIAS" \
+            --ksPass "$STORE_PASS" \
+            --ksKeyPass "$KEY_PASS" \
             --out signed-output
 
-          # Ubah nama file agar mudah dikenali
           mv signed-output/*-aligned-signed.apk signed-output/Safety-Driver-Final.apk
 
       - name: Upload Final APK
