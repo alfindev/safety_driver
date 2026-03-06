@@ -1,27 +1,111 @@
-- name: Generate Keystore & Sign APK
-  run: |
-    # Generate keystore langsung di CI (tidak perlu lokal)
-    keytool -genkeypair -v \
-      -keystore release.jks \
-      -alias safety-driver \
-      -keyalg RSA \
-      -keysize 2048 \
-      -validity 10000 \
-      -storepass password123 \
-      -keypass password123 \
-      -dname "CN=Safety Driver, OU=IT, O=Perusahaan, L=Jakarta, S=DKI, C=ID"
+name: Build & Sign APK Release
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
-    mkdir -p signed-output
-    RAW_APK=$(find nativephp/android/app/build/outputs/apk/release -name "*.apk" | head -n 1)
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.3"
+          extensions: mbstring, xml, sqlite3, gd, zip, curl, bcmath
 
-    curl -L -o uber-apk-signer.jar https://github.com/patrickfav/uber-apk-signer/releases/download/v1.3.0/uber-apk-signer-1.3.0.jar
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "17"
 
-    java -jar uber-apk-signer.jar \
-      --apks "$RAW_APK" \
-      --ks release.jks \
-      --ksAlias safety-driver \
-      --ksPass password123 \
-      --ksKeyPass password123 \
-      --out signed-output
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
 
-    find signed-output -name "*-signed.apk" -exec mv {} signed-output/Safety-Driver-Final.apk \;
+      - name: Install Dependencies
+        run: |
+          composer install --no-dev --optimize-autoloader --no-interaction
+          npm ci
+          npm run build
+
+      - name: Prepare NativePHP
+        run: |
+          php artisan native:install --no-interaction --force
+          rm -rf nativephp/ios
+          mkdir -p vendor/nativephp/mobile/src/Commands
+          cat <<EOF > vendor/nativephp/mobile/src/Commands/BuildIosAppCommand.php
+          <?php
+          namespace Native\Mobile\Commands;
+          use Illuminate\Console\Command;
+          class BuildIosAppCommand {
+              protected \$signature = 'native:build-ios';
+              public function handle() { return 0; }
+              public function bundleLaravelApp() { return true; }
+          }
+          EOF
+
+      - name: Patch & Branding
+        run: |
+          find nativephp/android -type f -exec sed -i 's/REPLACE_APP_ID/com.runner.bloomriverbold/g' {} +
+          STRINGS_FILE="nativephp/android/app/src/main/res/values/strings.xml"
+          [ -f "$STRINGS_FILE" ] && sed -i 's/REPLACE_APP_NAME/Safety Driver/g' "$STRINGS_FILE"
+          GRADLE_FILE="nativephp/android/app/build.gradle.kts"
+          if [ -f "$GRADLE_FILE" ]; then
+            sed -i 's/REPLACEMECODE/1/g' "$GRADLE_FILE"
+            sed -i 's/REPLACE_MINIFY_ENABLED/false/g' "$GRADLE_FILE"
+            sed -i 's/REPLACE_SHRINK_RESOURCES/false/g' "$GRADLE_FILE"
+            sed -i 's/REPLACE_DEBUG_SYMBOLS/none/g' "$GRADLE_FILE"
+          fi
+
+      - name: Build Unsigned APK
+        run: |
+          cd nativephp/android
+          chmod +x gradlew
+          ./gradlew assembleRelease
+
+      - name: Generate Keystore & Sign APK
+        run: |
+          # Generate keystore
+          keytool -genkeypair -v \
+            -keystore release.jks \
+            -alias safety-driver \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -storepass password123 \
+            -keypass password123 \
+            -dname "CN=Safety Driver, OU=IT, O=Perusahaan, L=Jakarta, S=DKI, C=ID"
+
+          # Verifikasi keystore
+          keytool -list -keystore release.jks -storepass password123
+
+          mkdir -p signed-output
+
+          RAW_APK=$(find nativephp/android/app/build/outputs/apk/release -name "*.apk" | head -n 1)
+          echo "APK ditemukan: $RAW_APK"
+
+          # Sign pakai jarsigner (built-in JDK)
+          jarsigner -verbose \
+            -sigalg SHA256withRSA \
+            -digestalg SHA-256 \
+            -keystore release.jks \
+            -storepass password123 \
+            -keypass password123 \
+            -signedjar signed-output/Safety-Driver-Final.apk \
+            "$RAW_APK" \
+            safety-driver
+
+          echo "Signing selesai!"
+          ls -la signed-output/
+
+      - name: Upload Final APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Safety-Driver-App
+          path: signed-output/Safety-Driver-Final.apk
