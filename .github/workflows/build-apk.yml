@@ -3,7 +3,7 @@ name: Build APK Android
 on:
   push:
     branches: [main]
-  workflow_dispatch: # bisa trigger manual dari GitHub
+  workflow_dispatch: # Bisa dijalankan manual dari tab Actions
 
 jobs:
   build:
@@ -19,17 +19,17 @@ jobs:
         uses: shivammathur/setup-php@v2
         with:
           php-version: "8.3"
-          extensions: mbstring, xml, sqlite3, gd, zip, curl
+          extensions: mbstring, xml, sqlite3, gd, zip, curl, bcmath
           coverage: none
 
-      # ── 3. Setup Node.js
+      # ── 3. Setup Node.js (Penting untuk bundling aset)
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "20"
           cache: "npm"
 
-      # ── 4. Setup Java (wajib untuk Android build)
+      # ── 4. Setup Java (Wajib untuk Android/Gradle)
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
@@ -40,23 +40,22 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      # ── 6. Install Composer dependencies
+      # ── 6. Install System Dependencies (Mencegah error ZIP)
+      - name: Install System Tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y zip unzip libnss3-dev
+
+      # ── 7. Install Composer dependencies
       - name: Install Composer
         run: composer install --no-dev --optimize-autoloader --no-interaction
 
-      # ── 7. Setup .env
+      # ── 8. Setup .env
       - name: Setup environment
         run: |
           cp .env.example .env
-          echo "APP_KEY=${{ secrets.APP_KEY }}" >> .env
+          php artisan key:generate --force
           echo "DB_CONNECTION=sqlite" >> .env
-          echo "MAIL_MAILER=smtp" >> .env
-          echo "MAIL_USERNAME=${{ secrets.MAIL_USERNAME }}" >> .env
-          echo "MAIL_PASSWORD=${{ secrets.MAIL_PASSWORD }}" >> .env
-
-      # ── 8. Generate app key (kalau APP_KEY secret belum diset)
-      - name: Generate App Key
-        run: php artisan key:generate --force
 
       # ── 9. Install NPM & Build assets
       - name: Build frontend assets
@@ -64,18 +63,28 @@ jobs:
           npm ci
           npm run build
 
-      # ── 10. Install NativePHP
-      - name: Install NativePHP
-        run: php artisan native:install --no-interaction
+      # ── 10. Install & Publish NativePHP
+      - name: Prepare NativePHP
+        run: |
+          php artisan native:install --no-interaction --force
+          php artisan native:publish
 
-      # ── 11. Build APK
+      # ── 11. Build APK Android
+      # Menambahkan 'android' setelah build untuk memastikan hanya target ini yang diproses
       - name: Build Android APK
-        run: php artisan native:build --no-interaction
+        run: php artisan native:build android --no-interaction -vvv
+        env:
+          NODE_ENV: production
 
-      # ── 12. Upload APK sebagai artifact (bisa didownload)
+      # ── 12. Cari dan Upload APK
+      # Menggunakan wildcard yang lebih luas karena path output bisa bervariasi tergantung versi
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: safety-driver-apk
-          path: dist/android/*.apk
+          path: |
+            dist/android/*.apk
+            storage/nativephp/builds/android/*.apk
+            android/app/build/outputs/apk/release/*.apk
+          if-no-files-found: warn
           retention-days: 30
