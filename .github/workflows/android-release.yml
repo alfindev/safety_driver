@@ -61,20 +61,21 @@ jobs:
           }
           EOF
 
-      # ── 4. PERBAIKAN FILE GRADLE (V2) ──
+      # ── 4. PERBAIKAN FILE GRADLE (V3 - Anti Placeholder) ──
       - name: Patch Broken Gradle Template
         run: |
-          # Fokus hanya pada file di folder nativephp/android
           TARGET_FILE="nativephp/android/app/build.gradle.kts"
-
+          
           if [ -f "$TARGET_FILE" ]; then
             echo "Patching file: $TARGET_FILE"
             sed -i 's/REPLACEMECODE/1/g' "$TARGET_FILE"
             sed -i 's/REPLACE_MINIFY_ENABLED/false/g' "$TARGET_FILE"
             sed -i 's/REPLACE_SHRINK_RESOURCES/false/g' "$TARGET_FILE"
+            # Perbaikan untuk error DebugSymbolLevel
+            sed -i 's/REPLACE_DEBUG_SYMBOLS/none/g' "$TARGET_FILE"
             
-            echo "Verifying patch..."
-            grep -E "versionCode|isMinifyEnabled|isShrinkResources" "$TARGET_FILE"
+            echo "Verifying patch result..."
+            grep -E "versionCode|isMinifyEnabled|isShrinkResources|debugSymbolLevel" "$TARGET_FILE" || true
           else
             echo "Error: $TARGET_FILE not found!"
             exit 1
@@ -91,7 +92,9 @@ jobs:
       - name: Collect APK
         run: |
           mkdir -p final-build-output
+          # Mencari APK hasil build assembleRelease
           find nativephp/android/app/build/outputs/apk/release -name "*.apk" -exec cp {} ./final-build-output/ \;
+          echo "Isi folder output:"
           ls ./final-build-output/
 
       # ── 7. SIGNING ──
