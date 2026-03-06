@@ -10,7 +10,6 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # ── 1. Persiapan Environment ──
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -35,7 +34,6 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      # ── 2. Install Dependensi ──
       - name: Install Dependencies
         run: |
           composer install --no-dev --optimize-autoloader --no-interaction
@@ -48,7 +46,6 @@ jobs:
           php artisan key:generate --force
           echo "NATIVEPHP_APP_ID=com.runner.bloomriverbold" >> .env
 
-      # ── 3. Bypass iOS (Langkah Krusial) ──
       - name: Prepare NativePHP & Bypass iOS
         run: |
           php artisan native:install --no-interaction --force
@@ -64,19 +61,23 @@ jobs:
           }
           EOF
 
-      # ── 4. Build APK (Unsigned) ──
       - name: Build Android APK
         run: php artisan native:build --no-interaction -vvv
         env:
           NODE_ENV: production
 
-      # ── 5. Proses Signing Resmi ──
+      # Langkah tambahan untuk debug jika folder tidak ditemukan
+      - name: List Files for Debugging
+        run: |
+          echo "Checking build outputs..."
+          ls -R nativephp/android/app/build/outputs/apk/ || echo "Folder not found"
+
       - name: Sign APK Release
         uses: r0adkll/sign-android-release@v1
         id: sign_app
         with:
-          # Mencari file APK di folder release hasil build NativePHP
-          releaseDirectory: android/app/build/outputs/apk/release
+          # Target folder release di dalam subfolder nativephp
+          releaseDirectory: nativephp/android/app/build/outputs/apk/release
           signingKeyBase64: ${{ secrets.SIGNING_KEY }}
           alias: ${{ secrets.ALIAS }}
           keyStorePassword: ${{ secrets.KEYSTORE_PASSWORD }}
@@ -84,10 +85,9 @@ jobs:
         env:
           BUILD_TOOLS_VERSION: "34.0.0"
 
-      # ── 6. Upload Hasil Akhir ──
       - name: Upload Official APK
         uses: actions/upload-artifact@v4
         with:
-          name: Safety-Driver-v1-Release
+          name: Safety-Driver-Release-Signed
           path: ${{ steps.sign_app.outputs.signedReleaseFile }}
           retention-days: 30
