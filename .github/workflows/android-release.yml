@@ -50,7 +50,7 @@ jobs:
         run: |
           php artisan native:install --no-interaction --force
           rm -rf nativephp/ios
-          # Create dummy iOS command to prevent artisan failure
+          # Membuat dummy command agar artisan tidak error saat mencari class iOS
           mkdir -p vendor/nativephp/mobile/src/Commands
           cat <<EOF > vendor/nativephp/mobile/src/Commands/BuildIosAppCommand.php
           <?php
@@ -63,10 +63,10 @@ jobs:
           }
           EOF
 
-      # ── 4. IKON & NAMA APLIKASI ──
+      # ── 4. BRANDING: IKON & NAMA APLIKASI ──
       - name: Setup Branding (Icon & Name)
         run: |
-          # 1. Update Ikon (Pastikan file ini ada di repo kamu)
+          # 1. Update Ikon (Pastikan ada file di public/icon.png)
           SOURCE_ICON="public/icon.png"
           TARGET_DIR="nativephp/android/app/src/main/res/mipmap-xxxhdpi"
           if [ -f "$SOURCE_ICON" ]; then
@@ -79,17 +79,16 @@ jobs:
           # 2. Update Nama Aplikasi di strings.xml
           STRINGS_FILE="nativephp/android/app/src/main/res/values/strings.xml"
           if [ -f "$STRINGS_FILE" ]; then
-            # Mengganti nama aplikasi yang muncul di HP
             sed -i 's/REPLACE_APP_NAME/Safety Driver/g' "$STRINGS_FILE"
           fi
 
-      # ── 5. OPERASI BEDAH FINAL (FORCE PATCH) ──
+      # ── 5. OPERASI BEDAH PLACEHOLDER (GANTI SEMUA VARIABLE RUSAK) ──
       - name: Force Patch Placeholder
         run: |
-          # Patch semua file di folder android secara massal untuk REPLACE_APP_ID
+          # Ganti REPLACE_APP_ID di semua file dalam folder android
           find nativephp/android -type f -exec sed -i 's/REPLACE_APP_ID/com.runner.bloomriverbold/g' {} +
           
-          # Patch spesifik untuk Gradle
+          # Patch spesifik untuk file Gradle (Placeholder NativePHP)
           GRADLE_FILE="nativephp/android/app/build.gradle.kts"
           if [ -f "$GRADLE_FILE" ]; then
             sed -i 's/REPLACEMECODE/1/g' "$GRADLE_FILE"
@@ -97,24 +96,24 @@ jobs:
             sed -i 's/REPLACE_SHRINK_RESOURCES/false/g' "$GRADLE_FILE"
             sed -i 's/REPLACE_DEBUG_SYMBOLS/none/g' "$GRADLE_FILE"
           fi
-          
           echo "Patching completed."
 
-      # ── 6. MANUAL GRADLE BUILD ──
+      # ── 6. MANUAL GRADLE BUILD (MENGHASILKAN APK) ──
       - name: Build with Gradle Manual
         run: |
           cd nativephp/android
           chmod +x gradlew
           ./gradlew assembleRelease --stacktrace
 
-      # ── 7. MENGUMPULKAN HASIL ──
+      # ── 7. MENGUMPULKAN HASIL APK ──
       - name: Collect APK
         run: |
           mkdir -p final-build-output
           find nativephp/android/app/build/outputs/apk/release -name "*.apk" -exec cp {} ./final-build-output/ \;
+          echo "Isi folder output:"
           ls ./final-build-output/
 
-      # ── 8. SIGNING ──
+      # ── 8. SIGNING (PEMBERIAN TANDA TANGAN DIGITAL) ──
       - name: Sign APK Release
         uses: r0adkll/sign-android-release@v1
         id: sign_app
@@ -127,7 +126,17 @@ jobs:
         env:
           BUILD_TOOLS_VERSION: "34.0.0"
 
-      - name: Upload Official APK
+      # Backup: Jika signing gagal, kita tetap bisa ambil APK mentah untuk dicek
+      - name: Upload Unsigned APK (Backup)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Safety-Driver-Unsigned-Build
+          path: final-build-output/*.apk
+
+      # Success: Upload APK yang sudah ditandatangani dan siap install
+      - name: Upload Official Signed APK
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: Safety-Driver-Final-Signed
