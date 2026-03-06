@@ -1,0 +1,93 @@
+name: Build & Sign APK Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      # ── 1. Persiapan Environment ──
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.3"
+          extensions: mbstring, xml, sqlite3, gd, zip, curl, bcmath
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "17"
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      # ── 2. Install Dependensi ──
+      - name: Install Dependencies
+        run: |
+          composer install --no-dev --optimize-autoloader --no-interaction
+          npm ci
+          npm run build
+
+      - name: Setup .env
+        run: |
+          cp .env.example .env
+          php artisan key:generate --force
+          echo "NATIVEPHP_APP_ID=com.runner.bloomriverbold" >> .env
+
+      # ── 3. Bypass iOS (Langkah Krusial) ──
+      - name: Prepare NativePHP & Bypass iOS
+        run: |
+          php artisan native:install --no-interaction --force
+          rm -rf nativephp/ios
+          cat <<EOF > vendor/nativephp/mobile/src/Commands/BuildIosAppCommand.php
+          <?php
+          namespace Native\Mobile\Commands;
+          use Illuminate\Console\Command;
+          class BuildIosAppCommand extends Command {
+              protected \$signature = 'native:build-ios';
+              public function handle() { return 0; }
+              public function bundleLaravelApp() { return true; }
+          }
+          EOF
+
+      # ── 4. Build APK (Unsigned) ──
+      - name: Build Android APK
+        run: php artisan native:build --no-interaction -vvv
+        env:
+          NODE_ENV: production
+
+      # ── 5. Proses Signing Resmi ──
+      - name: Sign APK Release
+        uses: r0adkll/sign-android-release@v1
+        id: sign_app
+        with:
+          # Mencari file APK di folder release hasil build NativePHP
+          releaseDirectory: android/app/build/outputs/apk/release
+          signingKeyBase64: ${{ secrets.SIGNING_KEY }}
+          alias: ${{ secrets.ALIAS }}
+          keyStorePassword: ${{ secrets.KEYSTORE_PASSWORD }}
+          keyPassword: ${{ secrets.KEY_PASSWORD }}
+        env:
+          BUILD_TOOLS_VERSION: "34.0.0"
+
+      # ── 6. Upload Hasil Akhir ──
+      - name: Upload Official APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Safety-Driver-v1-Release
+          path: ${{ steps.sign_app.outputs.signedReleaseFile }}
+          retention-days: 30
