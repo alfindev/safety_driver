@@ -46,35 +46,52 @@ jobs:
           php artisan key:generate --force
           echo "NATIVEPHP_APP_ID=com.runner.bloomriverbold" >> .env
 
-      # ── 3. Persiapan NativePHP & Generate Folder Android ──
-      - name: Prepare NativePHP Project
+      - name: Prepare NativePHP & Bypass iOS
         run: |
           php artisan native:install --no-interaction --force
-          # Pastikan folder android digenerate
-          php artisan native:build --no-interaction || echo "Native build command stopped, continuing manual..."
           rm -rf nativephp/ios
+          cat <<EOF > vendor/nativephp/mobile/src/Commands/BuildIosAppCommand.php
+          <?php
+          namespace Native\Mobile\Commands;
+          use Illuminate\Console\Command;
+          class BuildIosAppCommand extends Command {
+              protected \$signature = 'native:build-ios';
+              public function handle() { return 0; }
+              public function bundleLaravelApp() { return true; }
+          }
+          EOF
 
-      # ── 4. MANUAL GRADLE BUILD (Langkah Pasti) ──
+      # ── 4. PERBAIKAN FILE GRADLE (THE SURGERY) ──
+      - name: Patch Broken Gradle Template
+        run: |
+          # Cari lokasi file build.gradle.kts
+          TARGET_FILE=$(find . -name "build.gradle.kts" | grep "app/build.gradle.kts")
+          echo "Patching file: $TARGET_FILE"
+          
+          # Kita ganti placeholder yang error dengan nilai default
+          sed -i 's/REPLACEMECODE/1/g' "$TARGET_FILE"
+          sed -i 's/REPLACE_MINIFY_ENABLED/false/g' "$TARGET_FILE"
+          sed -i 's/REPLACE_SHRINK_RESOURCES/false/g' "$TARGET_FILE"
+          
+          # Verifikasi hasil patch
+          grep -E "versionCode|isMinifyEnabled|isShrinkResources" "$TARGET_FILE"
+
+      # ── 5. MANUAL GRADLE BUILD ──
       - name: Build with Gradle Manual
         run: |
-          # Cari di mana folder android berada, lalu masuk dan build
-          if [ -d "nativephp/android" ]; then
-            cd nativephp/android
-          elif [ -d "android" ]; then
-            cd android
-          fi
+          DIR=$(find . -name "gradlew" -exec dirname {} \; | head -n 1)
+          cd "$DIR"
           chmod +x gradlew
           ./gradlew assembleRelease --stacktrace
 
-      # ── 5. MENGUMPULKAN HASIL ──
+      # ── 6. MENGUMPULKAN HASIL ──
       - name: Collect APK
         run: |
           mkdir -p final-build-output
-          find . -name "*release*.apk" -exec cp {} ./final-build-output/ \;
-          echo "Isi folder output:"
+          find . -name "*.apk" -exec cp {} ./final-build-output/ \;
           ls ./final-build-output/
 
-      # ── 6. SIGNING ──
+      # ── 7. SIGNING ──
       - name: Sign APK Release
         uses: r0adkll/sign-android-release@v1
         id: sign_app
@@ -90,5 +107,5 @@ jobs:
       - name: Upload Official APK
         uses: actions/upload-artifact@v4
         with:
-          name: Safety-Driver-Signed-Official
+          name: Safety-Driver-Final-Signed
           path: ${{ steps.sign_app.outputs.signedReleaseFile }}
