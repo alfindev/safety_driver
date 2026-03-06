@@ -73,10 +73,8 @@ jobs:
           chmod +x gradlew
           ./gradlew assembleRelease
 
-      # ── SIGNING DENGAN SECRET KEYSTORE ──
       - name: Sign APK with Uber-APK-Signer
         env:
-          # Menggunakan nama secret 'KEYSTORE' sesuai permintaanmu
           ENCODED_KEYSTORE: ${{ secrets.KEYSTORE }}
           APP_ALIAS: ${{ secrets.ALIAS }}
           STORE_PASS: ${{ secrets.KEYSTORE_PASSWORD }}
@@ -85,11 +83,12 @@ jobs:
           mkdir -p signed-output
           RAW_APK=$(find nativephp/android/app/build/outputs/apk/release -name "*.apk" | head -n 1)
 
-          # Download tool signer
+          # Download signer
           curl -L -o uber-apk-signer.jar https://github.com/patrickfav/uber-apk-signer/releases/download/v1.3.0/uber-apk-signer-1.3.0.jar
 
-          # Decode file keystore dari secret KEYSTORE
-          echo "$ENCODED_KEYSTORE" | base64 -d > release.jks
+          # DECODE DENGAN PEMBERSIHAN EXTRA
+          # Menghapus spasi, enter, dan karakter aneh lainnya dari secret
+          echo "$ENCODED_KEYSTORE" | tr -d '\n\r ' | base64 -d > release.jks
 
           # Jalankan signing
           java -jar uber-apk-signer.jar \
@@ -100,7 +99,8 @@ jobs:
             --ksKeyPass "$KEY_PASS" \
             --out signed-output
 
-          mv signed-output/*-aligned-signed.apk signed-output/Safety-Driver-Final.apk
+          # Cari hasil yang sudah di-sign dan ganti namanya
+          find signed-output -name "*-signed.apk" -exec mv {} signed-output/Safety-Driver-Final.apk \;
 
       - name: Upload Final APK
         uses: actions/upload-artifact@v4
