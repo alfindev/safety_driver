@@ -10,11 +10,9 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # ── 1. Checkout code
       - name: Checkout
         uses: actions/checkout@v4
 
-      # ── 2. Setup PHP
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
@@ -22,35 +20,29 @@ jobs:
           extensions: mbstring, xml, sqlite3, gd, zip, curl, bcmath
           coverage: none
 
-      # ── 3. Setup Node.js
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "20"
           cache: "npm"
 
-      # ── 4. Setup Java (Wajib untuk Gradle Android)
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: "temurin"
           java-version: "17"
 
-      # ── 5. Setup Android SDK
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      # ── 6. Install System Tools
       - name: Install System Tools
         run: |
           sudo apt-get update
           sudo apt-get install -y zip unzip libnss3-dev
 
-      # ── 7. Install Composer dependencies
-      - name: Install Composer
+      - name: Install Composer dependencies
         run: composer install --no-dev --optimize-autoloader --no-interaction
 
-      # ── 8. Setup .env & Key
       - name: Setup environment
         run: |
           cp .env.example .env
@@ -58,25 +50,20 @@ jobs:
           echo "DB_CONNECTION=sqlite" >> .env
           echo "NATIVEPHP_APP_ID=com.runner.bloomriverbold" >> .env
 
-      # ── 9. Install NPM & Build assets
       - name: Build frontend assets
         run: |
           npm ci
           npm run build
 
-      # ── 10. Install NativePHP Mobile
-      # Kita hapus native:publish karena tidak ada di versi ini
-      - name: Prepare NativePHP
+      - name: Prepare NativePHP Mobile
         run: php artisan native:install --no-interaction --force
 
-      # ── 11. Build APK Android
-      # Menggunakan -vvv untuk melihat detail jika terjadi error lagi
+      # Kita hilangkan kata "android" karena command ini ternyata tidak menerima argumen
       - name: Build Android APK
-        run: php artisan native:build android --no-interaction -vvv
+        run: php artisan native:build --no-interaction -vvv
         env:
           NODE_ENV: production
 
-      # ── 12. Upload APK
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
@@ -86,5 +73,6 @@ jobs:
             storage/nativephp/builds/android/*.apk
             android/app/build/outputs/apk/release/*.apk
             android/app/build/outputs/apk/debug/*.apk
+            **/*.apk
           if-no-files-found: warn
           retention-days: 30
